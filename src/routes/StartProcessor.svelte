@@ -1,7 +1,16 @@
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/tauri";
-import { statusToString } from "../scripts/process";
+    import { State, statusToString, type Process } from "../scripts/process";
     import LoadingSpinner from "../lib/LoadingSpinner.svelte";
+    import {
+        createSvelteTable,
+        flexRender,
+        getCoreRowModel,
+        getSortedRowModel,
+        type ColumnDef,
+    } from "@tanstack/svelte-table";
+    import type { TableOptions } from "@tanstack/svelte-table";
+    import { writable } from "svelte/store";
 
     let hasFinished = false;
     let isLoading = false;
@@ -24,6 +33,77 @@ import { statusToString } from "../scripts/process";
         console.log(processLogs);
         console.log(partitionLogs);
     }
+
+    // =========================================================================
+
+    const defaultData: Process[] = [
+        {
+            name: "P1",
+            size: 20,
+            state: State.PENDING,
+            time: 20,
+        },
+        {
+            name: "P2",
+            size: 10,
+            state: State.PENDING,
+            time: 90,
+        },
+    ];
+
+    const defaultColumns: ColumnDef<Process>[] = [
+        {
+            accessorKey: "name",
+            cell: (info) => info.getValue(),
+            header: () => "Nombre",
+            footer: (info) => info.column.id,
+        },
+        {
+            accessorFn: (row) => row.size,
+            id: "size",
+            cell: (info) => info.getValue(),
+            header: () => "Tamaño",
+            footer: (info) => info.column.id,
+        },
+    ];
+
+    let sorting = [];
+
+    const setSorting = (updater) => {
+        if (updater instanceof Function) {
+            sorting = updater(sorting);
+        } else {
+            sorting = updater;
+        }
+        options.update((old) => ({
+            ...old,
+            state: {
+                ...old.state,
+                sorting,
+            },
+        }));
+    };
+
+    const options = writable<TableOptions<Process>>({
+        data: defaultData,
+        columns: defaultColumns,
+        state: {
+            sorting,
+        },
+        onSortingChange: setSorting,
+        getCoreRowModel: getCoreRowModel(),
+        getSortedRowModel: getSortedRowModel(),
+        debugTable: true,
+    });
+
+    const rerenderer = () => {
+        options.update((options) => ({
+            ...options,
+            data: defaultData,
+        }));
+    };
+
+    const table = createSvelteTable(options);
 </script>
 
 <div
@@ -102,4 +182,56 @@ import { statusToString } from "../scripts/process";
             </div>
         </div>
     {/if}
+    <div class="p-2">
+        <table>
+            <thead>
+                {#each $table.getHeaderGroups() as headerGroup}
+                    <tr>
+                        {#each headerGroup.headers as header}
+                            <th colspan={header.colSpan}>
+                                {#if !header.isPlaceholder}
+                                    <div
+                                        class:cursor-pointer={header.column.getCanSort()}
+                                        class:select-none={header.column.getCanSort()}
+                                        on:click={header.column.getToggleSortingHandler()}
+                                    >
+                                        <svelte:component
+                                            this={flexRender(
+                                                header.column.columnDef.header,
+                                                header.getContext()
+                                            )}
+                                        />
+                                        {{
+                                            asc: "a",
+                                            desc: "i",
+                                        }[
+                                            header.column
+                                                .getIsSorted()
+                                                .toString()
+                                        ] ?? ""}
+                                    </div>
+                                {/if}
+                            </th>
+                        {/each}
+                    </tr>
+                {/each}
+            </thead>
+            <tbody>
+                {#each $table.getRowModel().rows as row}
+                    <tr>
+                        {#each row.getVisibleCells() as cell}
+                            <td>
+                                <svelte:component
+                                    this={flexRender(
+                                        cell.column.columnDef.cell,
+                                        cell.getContext()
+                                    )}
+                                />
+                            </td>
+                        {/each}
+                    </tr>
+                {/each}
+            </tbody>
+        </table>
+    </div>
 </div>

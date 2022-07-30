@@ -12,6 +12,9 @@ pub mod database;
 mod model;
 
 fn main() {
+    // Start database base configuration
+    database::init_configuration();
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             save_process,
@@ -43,16 +46,12 @@ fn save_process(name: String, time: i32, size: i32) -> bool {
 fn start_processor() -> bool {
     use model::process::create_process_from_model;
 
-    // init processess partitions
+    database::clear_database();
+    database::create_iteration_log().expect("Error creating iteration log");
+
     let processes = database::select_all_processes().expect("Error finding processes");
 
-    database::delete_all_iteration_logs();
-    database::delete_all_processes_logs();
-    database::delete_all_processes_partitions();
-    database::delete_all_storage_partitions();
-    database::delete_all_storage_partitions_logs();
-
-    database::create_iteration_log().expect("Error creating iteration log");
+    // init processess partitions
     for process in &processes {
         // Create iteration for the logs
         // Create all initial partitions for the processes to enter.
@@ -154,7 +153,7 @@ fn select_all_storage_partition_logs() -> Result<Vec<models::StoragePartitionLog
 }
 
 #[tauri::command]
-fn select_all_process_logs() -> Result<Vec<(String, i32, i32, i32, i32)>, bool> {
+fn select_all_process_logs() -> Result<Vec<(String, i32, i32, i32)>, bool> {
     let process_logs = database::select_all_process_logs();
 
     if process_logs.is_ok() {

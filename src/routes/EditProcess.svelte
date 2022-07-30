@@ -95,8 +95,8 @@
             />
             <label for="processSizeInput">Tamaño del proceso</label>
         </div>
-        <button class="btn btn-primary" on:click={editProcess}
-            >Crear proceso
+        <button class="btn btn-primary" on:click={editProcess}>
+            Editar proceso
         </button>
     </div>
 </div>

@@ -1,6 +1,13 @@
 table! {
+    configuration (setting_id) {
+        setting_id -> Integer,
+        setting_value -> Text,
+    }
+}
+
+table! {
     iteration_log (id) {
-        id -> Nullable<Integer>,
+        id -> Integer,
     }
 }
 
@@ -18,7 +25,6 @@ table! {
     process_log (id) {
         id -> Integer,
         process_id -> Integer,
-        iteration_log_id -> Integer,
         storage_partition_id -> Integer,
         storage_partition_size -> Integer,
         time_remaining -> Integer,
@@ -55,6 +61,7 @@ joinable!(process_partition -> process (process_id));
 joinable!(process_partition -> storage_partition (storage_partition_id));
 
 allow_tables_to_appear_in_same_query!(
+    configuration,
     iteration_log,
     process,
     process_log,

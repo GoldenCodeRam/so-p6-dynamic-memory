@@ -1,10 +1,34 @@
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
+use crate::model;
 use crate::model::process::Process;
 
 pub mod models;
 pub mod schema;
+
+pub fn init_configuration() {
+    use crate::model::configuration::SettingName;
+    use schema::configuration;
+
+    let connection = establish_connection();
+
+    diesel::insert_into(configuration::table)
+        .values(&models::Configuration {
+            setting_id: SettingName::MemorySize as i32,
+            setting_value: String::from("50"),
+        })
+        .execute(&connection)
+        .expect("Could not init configuration.");
+}
+
+pub fn clear_database() {
+    delete_all_iteration_logs();
+    delete_all_processes_logs();
+    delete_all_processes_partitions();
+    delete_all_storage_partitions();
+    delete_all_storage_partitions_logs();
+}
 
 pub fn merge_storage_partitions() {
     use schema::process_partition;
@@ -14,6 +38,7 @@ pub fn merge_storage_partitions() {
 
     let mut has_finished_merging: bool;
     let mut partition_info: Vec<(i32, Option<i32>, i32)>;
+
     loop {
         partition_info = storage_partition::table
             .left_join(process_partition::table)
@@ -28,6 +53,7 @@ pub fn merge_storage_partitions() {
 
         println!("{:?}", partition_info);
         has_finished_merging = true;
+
         for i in 0..partition_info.len() {
             if partition_info[i].1.is_none() {
                 let mut new_partition_size = 0;
@@ -122,7 +148,7 @@ pub fn create_storage_partition_logs() {
     for partition in partitions {
         diesel::insert_into(storage_partition_log::table)
             .values(models::NewStoragePartitionLog {
-                iteration: iteration_log.id.unwrap(),
+                iteration: iteration_log.id,
                 storage_partition_id: partition.id,
                 position: partition.position,
                 size: partition.size,
@@ -156,7 +182,6 @@ pub fn create_process_log(process_id: i32) {
 
     let log = models::NewProcessLog {
         process_id,
-        iteration_log_id: iteration_id.id.unwrap(),
         state: data.1,
         storage_partition_id: data.4.unwrap_or(-1),
         storage_partition_size: data.5.unwrap_or(-1),
@@ -325,10 +350,12 @@ pub fn select_all_processes() -> QueryResult<Vec<models::Process>> {
     use schema::process;
 
     let connection = establish_connection();
-    process::table.load::<models::Process>(&connection)
+    process::table
+        .order(process::id)
+        .load::<models::Process>(&connection)
 }
 
-pub fn select_all_process_logs() -> QueryResult<Vec<(String, i32, i32, i32, i32)>> {
+pub fn select_all_process_logs() -> QueryResult<Vec<(String, i32, i32, i32)>> {
     use schema::process;
     use schema::process_log;
 
@@ -338,11 +365,10 @@ pub fn select_all_process_logs() -> QueryResult<Vec<(String, i32, i32, i32, i32)
         .select((
             process::name,
             process_log::state,
-            process_log::iteration_log_id,
             process_log::storage_partition_id,
-            process_log::time_remaining
+            process_log::time_remaining,
         ))
-        .load::<(String, i32, i32, i32, i32)>(&connection)
+        .load::<(String, i32, i32, i32)>(&connection)
 }
 
 pub fn select_all_storage_partition_logs() -> QueryResult<Vec<models::StoragePartitionLog>> {
@@ -420,4 +446,15 @@ fn establish_connection() -> SqliteConnection {
     let database_url = "../public/data.sqlite";
     SqliteConnection::establish(database_url)
         .expect(&format!("Error connecting to {}", database_url))
+}
+
+fn get_configuration_value(
+    value: model::configuration::SettingName,
+) -> QueryResult<models::Configuration> {
+    use schema::configuration;
+
+    let connection = establish_connection();
+    configuration::table
+        .find(value as i32)
+        .first::<models::Configuration>(&connection)
 }

@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
     import { invoke } from "@tauri-apps/api/tauri";
     import { Link } from "svelte-navigator";
 
@@ -12,7 +12,7 @@
 
     function updateProcessesTable() {
         hasFinishedLoading = false;
-        invoke("select_all_processes").then((result) => {
+        invoke("select_all_processes").then((result: any) => {
             hasFinishedLoading = true;
 
             processes.length = 0;
@@ -23,10 +23,7 @@
         });
     }
 
-    /**
-     * @param {number} processId
-     */
-    function deleteProcess(processId) {
+    function deleteProcess(processId: number) {
         invoke("delete_process_with_id", {
             id: processId,
         }).then((result) => {
@@ -39,9 +36,7 @@
     updateProcessesTable();
 </script>
 
-<div
-    class="p-2 bg-gray d-flex flex-1-1-auto justify-content-center align-items-center"
->
+<div class="p-2 bg-gray d-flex flex-1-1-auto">
     {#if hasFinishedLoading}
         {#if isTableNotEmpty}
             <div class="container-fluid text-center p-4 bg-white rounded">

@@ -1,7 +1,8 @@
 use serde::Serialize;
 
 use super::schema::{
-    process, process_log, process_partition, storage_partition, storage_partition_log,
+    configuration, process, process_log, process_partition, storage_partition,
+    storage_partition_log,
 };
 
 #[derive(Queryable, Serialize)]
@@ -38,7 +39,7 @@ pub struct NewStoragePartition {
 
 #[derive(Queryable, Serialize)]
 pub struct IterationLog {
-    pub id: Option<i32>,
+    pub id: i32,
 }
 
 #[derive(Insertable)]
@@ -63,7 +64,6 @@ pub struct StoragePartitionLog {
 #[table_name = "process_log"]
 pub struct NewProcessLog {
     pub process_id: i32,
-    pub iteration_log_id: i32,
     pub storage_partition_id: i32,
     pub storage_partition_size: i32,
     pub time_remaining: i32,
@@ -74,7 +74,6 @@ pub struct NewProcessLog {
 pub struct ProcessLog {
     pub id: i32,
     pub process_id: i32,
-    pub iteration_log_id: i32,
     pub storage_partition_id: i32,
     pub storage_partition_size: i32,
     pub time_remaining: i32,
@@ -86,4 +85,11 @@ pub struct ProcessLog {
 pub struct ProcessPartition {
     pub process_id: i32,
     pub storage_partition_id: i32,
+}
+
+#[derive(Queryable, Serialize, Insertable)]
+#[table_name = "configuration"]
+pub struct Configuration {
+    pub setting_id: i32,
+    pub setting_value: String,
 }
