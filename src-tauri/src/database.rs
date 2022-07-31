@@ -3,6 +3,7 @@ use diesel::sqlite::SqliteConnection;
 
 use crate::model;
 use crate::model::process::Process;
+use crate::model::state::StateEnum;
 
 pub mod models;
 pub mod schema;
@@ -13,6 +14,9 @@ pub fn init_configuration() {
 
     let connection = establish_connection();
 
+    diesel::delete(configuration::table)
+        .execute(&connection)
+        .expect("Could not delete table contents");
     diesel::insert_into(configuration::table)
         .values(&models::Configuration {
             setting_id: SettingName::MemorySize as i32,
@@ -28,6 +32,28 @@ pub fn clear_database() {
     delete_all_processes_partitions();
     delete_all_storage_partitions();
     delete_all_storage_partitions_logs();
+}
+
+pub fn add_processes_to_memory() -> bool {
+    let processes = select_processes_with_state(StateEnum::READY as i32);
+
+    if processes.len() == 0 {
+        return false;
+    } else {
+        // init processess partitions
+        for process in &processes {
+            // Create iteration for the logs
+            // Create all initial partitions for the processes to enter.
+            let storage_partition = create_storage_partition(process.size)
+                .expect("Something went wrong when creating the storage partition.");
+
+            create_process_partition(models::ProcessPartition {
+                process_id: process.id,
+                storage_partition_id: storage_partition.id,
+            });
+        }
+        return true;
+    }
 }
 
 pub fn merge_storage_partitions() {
@@ -143,7 +169,7 @@ pub fn create_storage_partition_logs() {
     let connection = establish_connection();
 
     let iteration_log = select_last_iteration_log().unwrap();
-    let partitions = select_all_storage_partitions().unwrap();
+    let partitions = select_all_storage_partitions();
 
     for partition in partitions {
         diesel::insert_into(storage_partition_log::table)
@@ -214,8 +240,29 @@ pub fn create_storage_partition_with_position(position: i32, size: i32) -> Query
         .execute(&connection)
 }
 
-pub fn create_storage_partition(size: i32) -> QueryResult<models::StoragePartition> {
+pub fn create_storage_partition(size: i32) -> Option<models::StoragePartition> {
     use schema::storage_partition;
+
+    if can_create_storage_partition(size) {
+        create_storage_partition(size);
+    }
+
+    let partitions = select_all_storage_partitions();
+
+    let mut used_memory: i32 = 0;
+    for partition in partitions {
+        used_memory += partition.size;
+    }
+
+    if used_memory + size
+        > get_configuration_value(SettingName::MemorySize)
+            .setting_value
+            .parse::<i32>()
+            .unwrap()
+    {
+        return None;
+    } else {
+    }
 
     let connection = establish_connection();
 
@@ -240,10 +287,6 @@ pub fn create_storage_partition(size: i32) -> QueryResult<models::StoragePartiti
         .values(&new_partition)
         .execute(&connection)
         .expect("Error inserting storage partition.");
-
-    storage_partition::table
-        .order(storage_partition::id.desc())
-        .first::<models::StoragePartition>(&connection)
 }
 
 pub fn delete_process_partition_with_process_id(process_id: i32) {
@@ -355,6 +398,17 @@ pub fn select_all_processes() -> QueryResult<Vec<models::Process>> {
         .load::<models::Process>(&connection)
 }
 
+pub fn select_processes_with_state(state: i32) -> Vec<models::Process> {
+    use schema::process;
+
+    let connection = establish_connection();
+    process::table
+        .order(process::id)
+        .filter(process::state.eq(state))
+        .load::<models::Process>(&connection)
+        .expect("Could not retrieve processes with state.")
+}
+
 pub fn select_all_process_logs() -> QueryResult<Vec<(String, i32, i32, i32)>> {
     use schema::process;
     use schema::process_log;
@@ -378,11 +432,13 @@ pub fn select_all_storage_partition_logs() -> QueryResult<Vec<models::StoragePar
     storage_partition_log::table.load::<models::StoragePartitionLog>(&connection)
 }
 
-pub fn select_all_storage_partitions() -> QueryResult<Vec<models::StoragePartition>> {
+pub fn select_all_storage_partitions() -> Vec<models::StoragePartition> {
     use schema::storage_partition;
 
     let connection = establish_connection();
-    storage_partition::table.load::<models::StoragePartition>(&connection)
+    storage_partition::table
+        .load::<models::StoragePartition>(&connection)
+        .expect("Could not get storage partitions.")
 }
 
 pub fn delete_all_processes_logs() {
@@ -448,13 +504,29 @@ fn establish_connection() -> SqliteConnection {
         .expect(&format!("Error connecting to {}", database_url))
 }
 
-fn get_configuration_value(
-    value: model::configuration::SettingName,
-) -> QueryResult<models::Configuration> {
+fn get_configuration_value(value: model::configuration::SettingName) -> models::Configuration {
     use schema::configuration;
 
     let connection = establish_connection();
     configuration::table
         .find(value as i32)
         .first::<models::Configuration>(&connection)
+        .expect("Could not get configuration.")
+}
+
+fn can_create_storage_partition(size: i32) -> bool {
+    use model::configuration::SettingName;
+
+    let partitions = select_all_storage_partitions();
+
+    let mut used_memory: i32 = 0;
+    for partition in partitions {
+        used_memory += partition.size;
+    }
+
+    return used_memory + size
+        < get_configuration_value(SettingName::MemorySize)
+            .setting_value
+            .parse::<i32>()
+            .unwrap();
 }

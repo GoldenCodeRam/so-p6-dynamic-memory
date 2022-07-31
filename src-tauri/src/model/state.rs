@@ -2,7 +2,6 @@ use super::process::Process;
 
 #[derive(Copy, Clone)]
 pub enum StateEnum {
-    PENDING,
     READY,
     RUNNING,
     FINISHED,
@@ -14,24 +13,9 @@ pub trait State {
     fn has_finished(&self) -> bool;
 }
 
-pub struct Pending;
-impl State for Pending {
-    fn process(self: Box<Pending>, process: &mut Process) -> Box<dyn State> {
-        Box::new(Ready {})
-    }
-
-    fn get_state_number(&self) -> i32 {
-        StateEnum::PENDING as i32
-    }
-
-    fn has_finished(&self) -> bool {
-        false
-    }
-}
-
-struct Ready;
+pub struct Ready;
 impl State for Ready {
-    fn process(self: Box<Ready>, process: &mut Process) -> Box<dyn State> {
+    fn process(self: Box<Ready>, _process: &mut Process) -> Box<dyn State> {
         Box::new(Running {})
     }
 
@@ -66,7 +50,7 @@ impl State for Running {
 
 struct Finished;
 impl State for Finished {
-    fn process(self: Box<Self>, process: &mut Process) -> Box<dyn State> {
+    fn process(self: Box<Self>, _process: &mut Process) -> Box<dyn State> {
         panic!("This should not happen.")
     }
 
@@ -81,7 +65,6 @@ impl State for Finished {
 
 pub fn get_state_from_enum(value: i32) -> Option<Box<dyn State>> {
     match value {
-        value if value == StateEnum::PENDING as i32 => Some(Box::new(Pending {})),
         value if value == StateEnum::READY as i32 => Some(Box::new(Ready {})),
         value if value == StateEnum::RUNNING as i32 => Some(Box::new(Running {})),
         value if value == StateEnum::FINISHED as i32 => Some(Box::new(Finished {})),

@@ -49,20 +49,7 @@ fn start_processor() -> bool {
     database::clear_database();
     database::create_iteration_log().expect("Error creating iteration log");
 
-    let processes = database::select_all_processes().expect("Error finding processes");
-
-    // init processess partitions
-    for process in &processes {
-        // Create iteration for the logs
-        // Create all initial partitions for the processes to enter.
-        let storage_partition = database::create_storage_partition(process.size)
-            .expect("Something went wrong when creating the storage partition.");
-
-        database::create_process_partition(models::ProcessPartition {
-            process_id: process.id,
-            storage_partition_id: storage_partition.id,
-        });
-    }
+    database::add_processes_to_memory();
 
     while database::select_all_processes_from_processes_partitions()
         .expect("Error finding processes")

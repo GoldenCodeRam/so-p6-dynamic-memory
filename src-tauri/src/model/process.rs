@@ -18,7 +18,7 @@ impl Process {
             name,
             time,
             size,
-            state: Some(Box::new(state::Pending {})),
+            state: Some(Box::new(state::Ready {})),
         }
     }
 
