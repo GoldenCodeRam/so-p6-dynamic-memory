@@ -46,8 +46,8 @@
                         <tr>
                             <th scope="col">Id</th>
                             <th scope="col">Nombre</th>
-                            <th scope="col">Tiempo</th>
                             <th scope="col">Tamaño</th>
+                            <th scope="col">Tiempo</th>
                             <th scope="col">Estado</th>
                             <th scope="col">Acciones</th>
                         </tr>
@@ -57,8 +57,8 @@
                             <tr>
                                 <th scope="row">{id}</th>
                                 <td>{name}</td>
-                                <td>{time}</td>
                                 <td>{size}</td>
+                                <td>{time}</td>
                                 <td>{statusToString(state)}</td>
                                 <td>
                                     <Link to="/editProcess/{id}">

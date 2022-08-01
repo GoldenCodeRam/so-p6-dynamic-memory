@@ -7,6 +7,7 @@
     import ListProcesses from "./routes/ListProcesses.svelte";
     import EditProcess from "./routes/EditProcess.svelte";
     import StartProcessor from "./routes/StartProcessor.svelte";
+    import ChangeMemorySize from "./routes/ChangeMemorySize.svelte";
 </script>
 
 <Router>
@@ -53,6 +54,14 @@
                         Eliminar todos los procesos
                     </Link>
                 </li>
+                <li class="nav-item" data-bs-dismiss="offcanvas">
+                    <Link
+                        to="changeMemorySize"
+                        class="nav-link border rounded-3"
+                    >
+                        Cambiar tamaño de la memoria
+                    </Link>
+                </li>
             </ul>
         </div>
     </div>
@@ -91,6 +100,9 @@
         </Route>
         <Route path="deleteAllProcesses">
             <DeleteAllProcesses />
+        </Route>
+        <Route path="changeMemorySize">
+            <ChangeMemorySize />
         </Route>
     </main>
 </Router>

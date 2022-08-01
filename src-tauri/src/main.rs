@@ -26,10 +26,12 @@ fn main() {
             start_processor,
             select_all_storage_partitions,
             select_all_process_logs,
-            select_all_storage_partition_logs
+            select_all_storage_partition_logs,
+            change_memory_size,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+
 }
 
 #[tauri::command]
@@ -49,43 +51,55 @@ fn start_processor() -> bool {
     database::clear_database();
     database::create_iteration_log().expect("Error creating iteration log");
 
-    database::add_processes_to_memory();
-
-    while database::select_all_processes_from_processes_partitions()
-        .expect("Error finding processes")
-        .iter()
-        .len()
-        > 0
-    {
+    // This means there is no ready processes in the processor, so it has finished
+    println!("Adding processes to memory...");
+    if !database::add_processes_to_memory() {
+        println!("Empty processes at start.");
+        return true;
+    }
+    println!("Finished adding processes to memory.");
+    // Here I generate a new partition with the remaining epty space
+    database::create_storage_partition_from_remaining_space();
+    // Log the start of the partitions
+    database::create_storage_partition_logs();
+    loop {
         database::create_iteration_log().expect("Error creating iteration log");
         database::select_all_processes_from_processes_partitions()
-            .expect("Error finding processes")
             .iter()
             .map(|process| create_process_from_model(process))
             .for_each(|mut process| {
+                process.process();
+                database::update_process_with_id(process.id.unwrap(), &process)
+                    .expect("Could not update process");
                 database::create_process_log(process.id.unwrap());
-                if process.has_finished() {
-                    database::delete_process_partition_with_process_id(process.id.unwrap());
-                    database::merge_storage_partitions();
-                } else {
-                    process.process();
-                    database::update_process_with_id(process.id.unwrap(), process)
-                        .expect("Could not update process");
-                }
             });
         database::create_storage_partition_logs();
-    }
 
-    //TODO delete all iteration log partitions
-    //TODO delete all process log partitions
-    return true;
+        // Try and add the remaining processes to the memory with the partitions
+        // as they are.
+        database::add_processes_to_memory();
+        // After the processes are added or none could be added, merge the
+        // remaining partitions
+        database::merge_storage_partitions();
+        // Now the partitions are merged try again to add processes, if it can
+        // the processor continues, if it could'nt it means one of two things:
+        // 1. The processor has no ready processes but it hasn't finished.
+        // 2. The processor has no ready processes and it has finished
+        if !database::add_processes_to_memory() {
+            // The processor does not have ready processes and the partitions are
+            // empty, the processor has finished
+            if database::select_all_processes_from_processes_partitions().len() == 0 {
+                return true;
+            }
+        }
+    }
 }
 
 #[tauri::command]
 fn update_process_with_id(id: i32, name: String, time: i32, size: i32) -> bool {
     if database::check_process_name_is_unique(Some(id), &name) {
         let process = model::process::Process::new(name, time, size);
-        database::update_process_with_id(id, process).is_ok()
+        database::update_process_with_id(id, &process).is_ok()
     } else {
         false
     }
@@ -118,14 +132,8 @@ fn select_all_processes() -> Result<Vec<models::Process>, bool> {
 }
 
 #[tauri::command]
-fn select_all_storage_partitions() -> Result<Vec<models::StoragePartition>, bool> {
-    let partitions = database::select_all_storage_partitions();
-
-    if partitions.is_ok() {
-        Ok(partitions.unwrap())
-    } else {
-        Err(false)
-    }
+fn select_all_storage_partitions() -> Vec<models::StoragePartition> {
+    return database::select_all_storage_partitions();
 }
 
 #[tauri::command]
@@ -153,4 +161,23 @@ fn select_all_process_logs() -> Result<Vec<(String, i32, i32, i32)>, bool> {
 #[tauri::command]
 fn delete_process_with_id(id: i32) -> bool {
     database::delete_process_with_id(id).is_ok()
+}
+
+#[tauri::command]
+fn change_memory_size(size: i32) {
+    database::statements::update_memory_size(size);
+}
+
+#[tauri::command]
+fn processor_test() {
+    // TESTING =================================================================
+        delete_all_processes();
+        save_process(String::from("P11"), 5, 11);
+        save_process(String::from("P15"), 7, 15);
+        save_process(String::from("P18"), 8, 18);
+        save_process(String::from("P6"), 3, 6);
+        save_process(String::from("P9"), 4, 9);
+        save_process(String::from("P13"), 6, 13);
+        save_process(String::from("P20"), 2, 20);
+    // TESTING =================================================================
 }

@@ -24,9 +24,9 @@ table! {
 table! {
     process_log (id) {
         id -> Integer,
+        iteration -> Integer,
         process_id -> Integer,
         storage_partition_id -> Integer,
-        storage_partition_size -> Integer,
         time_remaining -> Integer,
         state -> Integer,
     }

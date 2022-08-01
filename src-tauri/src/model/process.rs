@@ -22,10 +22,6 @@ impl Process {
         }
     }
 
-    pub fn has_finished(&self) -> bool {
-        self.state.as_ref().unwrap().has_finished()
-    }
-
     pub fn process(&mut self) {
         println!(
             "Processing {} with status {}",

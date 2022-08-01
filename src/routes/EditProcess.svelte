@@ -79,21 +79,21 @@
             <input
                 type="number"
                 class="form-control"
-                id="processTimeInput"
-                placeholder="tiempo"
-                bind:this={processTimeInput}
-            />
-            <label for="processTimeInput">Tiempo del proceso</label>
-        </div>
-        <div class="form-floating mb-3">
-            <input
-                type="number"
-                class="form-control"
                 id="processSizeInput"
                 placeholder="tamaño"
                 bind:this={processSizeInput}
             />
             <label for="processSizeInput">Tamaño del proceso</label>
+        </div>
+        <div class="form-floating mb-3">
+            <input
+                type="number"
+                class="form-control"
+                id="processTimeInput"
+                placeholder="tiempo"
+                bind:this={processTimeInput}
+            />
+            <label for="processTimeInput">Tiempo del proceso</label>
         </div>
         <button class="btn btn-primary" on:click={editProcess}>
             Editar proceso

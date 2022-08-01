@@ -63,9 +63,9 @@ pub struct StoragePartitionLog {
 #[derive(Insertable)]
 #[table_name = "process_log"]
 pub struct NewProcessLog {
+    pub iteration: i32,
     pub process_id: i32,
     pub storage_partition_id: i32,
-    pub storage_partition_size: i32,
     pub time_remaining: i32,
     pub state: i32,
 }
@@ -73,9 +73,9 @@ pub struct NewProcessLog {
 #[derive(Queryable, Serialize)]
 pub struct ProcessLog {
     pub id: i32,
+    pub iteration: i32,
     pub process_id: i32,
     pub storage_partition_id: i32,
-    pub storage_partition_size: i32,
     pub time_remaining: i32,
     pub state: i32,
 }
