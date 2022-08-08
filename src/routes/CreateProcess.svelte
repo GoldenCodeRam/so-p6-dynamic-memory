@@ -22,7 +22,7 @@
                     isBlocked: true,
                 }).then((response) => {
                     if (!response) {
-                        errorMessage = `El nombre de proceso ${processNameInput.value} ya se encuentra en uso.`;
+                        errorMessage = `El nombre de proceso ${processNameInput.value}, ya se encuentra en uso.`;
                         new Modal("#modal").show();
                     }
                     processNameInput.value = "";

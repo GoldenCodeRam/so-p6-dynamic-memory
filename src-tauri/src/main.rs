@@ -8,13 +8,12 @@ extern crate diesel;
 
 use crate::database::models;
 
+use self::database::configuration;
+
 pub mod database;
 mod model;
 
 fn main() {
-    // Start database base configuration
-    database::init_configuration();
-
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             save_process,
@@ -24,21 +23,23 @@ fn main() {
             delete_process_with_id,
             update_process_with_id,
             start_processor,
-            select_all_storage_partitions,
-            select_all_process_logs,
-            select_all_storage_partition_logs,
             change_memory_size,
+            select_finished_processes,
+            select_compactions,
+            select_condensations,
+            select_compaction_logs,
+            select_condensation_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-
 }
 
 #[tauri::command]
 fn save_process(name: String, time: i32, size: i32) -> bool {
     if database::check_process_name_is_unique(None, &name) {
         let process = model::process::Process::new(name, time, size);
-        database::create_process(process).is_ok()
+        database::create_process(process);
+        true
     } else {
         false
     }
@@ -48,8 +49,11 @@ fn save_process(name: String, time: i32, size: i32) -> bool {
 fn start_processor() -> bool {
     use model::process::create_process_from_model;
 
+    // Start database base configuration
+    database::init_configuration();
+
     database::clear_database();
-    database::create_iteration_log().expect("Error creating iteration log");
+    database::create_iteration_log();
 
     // This means there is no ready processes in the processor, so it has finished
     println!("Adding processes to memory...");
@@ -58,12 +62,13 @@ fn start_processor() -> bool {
         return true;
     }
     println!("Finished adding processes to memory.");
-    // Here I generate a new partition with the remaining epty space
+    // Here I generate a new partition with the remaining empty space, this
+    // should only be run once, and it is when the processor starts.
     database::create_storage_partition_from_remaining_space();
     // Log the start of the partitions
     database::create_storage_partition_logs();
     loop {
-        database::create_iteration_log().expect("Error creating iteration log");
+        database::create_iteration_log();
         database::select_all_processes_from_processes_partitions()
             .iter()
             .map(|process| create_process_from_model(process))
@@ -75,19 +80,26 @@ fn start_processor() -> bool {
             });
         database::create_storage_partition_logs();
 
-        // Try and add the remaining processes to the memory with the partitions
-        // as they are.
-        database::add_processes_to_memory();
-        // After the processes are added or none could be added, merge the
-        // remaining partitions
+        // Before we try to add a new process to the processor and its partitions,
+        // we need to check if the partitions that the processor has can be
+        // compacted, so start by swapping process partitions with empty partitions.
+        println!("Swapping partitions...");
+        database::swap_process_partitions_with_empty_partitions();
+        println!("finished swapping partitions...");
+        // After the swap, merge all the empty swapped partitions.
+        println!("Merging partitions...");
         database::merge_storage_partitions();
-        // Now the partitions are merged try again to add processes, if it can
-        // the processor continues, if it could'nt it means one of two things:
+        println!("finished Merging partitions...");
+        // Try and add the remaining processes to the memory with the new big
+        // compacted partition if it did that.
+        //
+        // If the processor could'nt add processes after the compactation it
+        // means one of two things:
         // 1. The processor has no ready processes but it hasn't finished.
-        // 2. The processor has no ready processes and it has finished
+        // 2. The processor has no ready processes and it has finished.
         if !database::add_processes_to_memory() {
             // The processor does not have ready processes and the partitions are
-            // empty, the processor has finished
+            // empty, so the processor has finished.
             if database::select_all_processes_from_processes_partitions().len() == 0 {
                 return true;
             }
@@ -165,19 +177,30 @@ fn delete_process_with_id(id: i32) -> bool {
 
 #[tauri::command]
 fn change_memory_size(size: i32) {
-    database::statements::update_memory_size(size);
+    database::configuration::set_memory_size(size);
 }
 
 #[tauri::command]
-fn processor_test() {
-    // TESTING =================================================================
-        delete_all_processes();
-        save_process(String::from("P11"), 5, 11);
-        save_process(String::from("P15"), 7, 15);
-        save_process(String::from("P18"), 8, 18);
-        save_process(String::from("P6"), 3, 6);
-        save_process(String::from("P9"), 4, 9);
-        save_process(String::from("P13"), 6, 13);
-        save_process(String::from("P20"), 2, 20);
-    // TESTING =================================================================
+fn select_finished_processes() -> Vec<(models::FinishedProcess, models::Process)> {
+    database::select_all_finished_processes()
+}
+
+#[tauri::command]
+fn select_compactions() -> i32 {
+    configuration::get_compactions()
+}
+
+#[tauri::command]
+fn select_condensations() -> i32 {
+    configuration::get_condensations()
+}
+
+#[tauri::command]
+fn select_compaction_logs() -> Vec<models::CompactionLog> {
+    database::select_all_compaction_logs()
+}
+
+#[tauri::command]
+fn select_condensation_logs() -> Vec<models::CondensationLog> {
+    database::select_all_condensation_logs()
 }

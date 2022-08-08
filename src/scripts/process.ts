@@ -1,4 +1,3 @@
-import { createColumnHelper, type ColumnDef } from "@tanstack/svelte-table";
 
 export enum State {
     READY,
@@ -39,17 +38,5 @@ export type Process = {
     time: number;
     size: number;
     state: State;
+    partition_number: number;
 };
-
-const columnHelper = createColumnHelper<Process>();
-
-const defaultColumns: ColumnDef<Process>[] = [
-    columnHelper.display({
-        id: "actions",
-        cell: (props) => props.row,
-    }),
-    columnHelper.accessor("name", {
-        cell: (info) => info.getValue(),
-        footer: (props) => props.column.id,
-    }),
-];

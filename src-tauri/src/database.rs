@@ -3,42 +3,81 @@ use diesel::sqlite::SqliteConnection;
 
 use crate::model::process::Process;
 use crate::model::state::StateEnum;
-use crate::model::{self};
 
+use self::statements::{create_condensation_log, select_storage_partition_with_position};
+
+pub mod configuration;
 pub mod models;
 pub mod schema;
 pub mod statements;
 
 pub fn init_configuration() {
-    use crate::model::configuration::SettingName;
-    use schema::configuration;
+    // Reset previous configuration set by the user.
+    configuration::reset_configuration();
+    // Set base memory size.
+    configuration::set_memory_size(50);
+    // TODO: set partition consecutive number to 1
+    // TODO: Set compactions to 0
+    // TODO: Set condensations to 0
+}
 
-    let connection = establish_connection();
-
-    diesel::delete(configuration::table)
-        .execute(&connection)
-        .expect("Could not delete table contents");
-    diesel::insert_into(configuration::table)
-        .values(&models::Configuration {
-            setting_id: SettingName::MemorySize as i32,
-            setting_value: String::from("50"),
-        })
-        .execute(&connection)
-        .expect("Could not init configuration.");
+pub fn init_processes() -> () {
+    // WARN: THIS IS ONLY FOR TESTING, and should be removed when running.
+    create_process(Process::new("P1".to_string(), 20, 10));
+    create_process(Process::new("P2".to_string(), 6, 4));
+    create_process(Process::new("P3".to_string(), 18, 9));
+    create_process(Process::new("P4".to_string(), 4, 20));
+    create_process(Process::new("P5".to_string(), 3, 10));
+    create_process(Process::new("P6".to_string(), 12, 18));
+    create_process(Process::new("P7".to_string(), 14, 17));
+    create_process(Process::new("P8".to_string(), 8, 16));
+    create_process(Process::new("P9".to_string(), 9, 1));
+    create_process(Process::new("P10".to_string(), 10, 50));
 }
 
 pub fn clear_database() {
+    // Remove everything BUT the processes, as this can be useful.
     delete_all_iteration_logs();
     delete_all_processes_logs();
     delete_all_processes_partitions();
     delete_all_storage_partitions();
     delete_all_storage_partitions_logs();
+    delete_all_finished_processes();
+    delete_all_condensations_logs();
+    delete_all_compactions_logs();
+}
+
+fn delete_all_compactions_logs() -> () {
+    use schema::compaction_log;
+
+    let connection = establish_connection();
+    diesel::delete(compaction_log::table)
+        .execute(&connection)
+        .expect("Could not delete compactions log");
+}
+
+fn delete_all_condensations_logs() -> () {
+    use schema::condensation_log;
+
+    let connection = establish_connection();
+    diesel::delete(condensation_log::table)
+        .execute(&connection)
+        .expect("Could not delete condensation log");
+}
+
+fn delete_all_finished_processes() -> () {
+    use schema::finished_process;
+
+    let connection = establish_connection();
+    diesel::delete(finished_process::table)
+        .execute(&connection)
+        .expect("Could not delete finished processes");
 }
 
 pub fn add_processes_to_memory() -> bool {
     // Select all ready processes
-    println!("Selecting processes with state...");
-    let processes = select_processes_with_state(StateEnum::READY as i32);
+    println!("Selecting processes with ready state...");
+    let processes = select_processes_with_state(StateEnum::Ready as i32);
     let process_partitions = select_all_processes_from_processes_partitions();
 
     // If there is no ready process in the main list, it means the processor
@@ -76,8 +115,6 @@ pub fn add_processes_to_memory() -> bool {
 }
 
 pub fn create_storage_partition_from_remaining_space() {
-    use model::configuration::SettingName;
-
     // Get all the current partitions and calculate the total memory they are
     // using
     let mut used_memory: i32 = 0;
@@ -86,11 +123,7 @@ pub fn create_storage_partition_from_remaining_space() {
     }
 
     // Get the remaining space if there is any
-    let remaining_space = get_configuration_value(SettingName::MemorySize)
-        .setting_value
-        .parse::<i32>()
-        .unwrap()
-        - used_memory;
+    let remaining_space = configuration::get_memory_size() - used_memory;
 
     if remaining_space > 0 {
         create_storage_partition(remaining_space);
@@ -166,39 +199,69 @@ pub fn get_empty_storage_partition(process_size: i32) -> Option<models::StorageP
     return None;
 }
 
+pub fn swap_process_partitions_with_empty_partitions() -> () {
+    let mut partitions: Vec<(i32, i32, i32, i32, Option<i32>)>;
+    let mut made_compaction = false;
+    // Get all the partitions
+    partitions = statements::select_all_storage_partitions_and_process_partitions();
+    println!("{:?}", partitions);
+    // Get all the storage partitions and process partitions, ordered by
+    // position and if it has a process or not.
+    for i in 0..partitions.len() {
+        // If the partition is empty, we can try to search a non-empty partition
+        // and swap the positions of the partitions, so always the empty are
+        // at the end.
+        if partitions[i].4.is_none() {
+            // From the current empty partition search the next non-empty
+            // partition.
+            for e in i..partitions.len() {
+                // If it found a non-empty partition, do the swap
+                if !partitions[e].4.is_none() {
+                    println!("swapping {:?} and {:?}", partitions[e], partitions[i]);
+                    update_storage_partition_position(partitions[e].0, partitions[i].1);
+                    update_storage_partition_position(partitions[i].0, partitions[e].1);
+                    // Save log of the part of the compaction done
+                    statements::create_compaction_log(
+                        partitions[e].2,
+                        partitions[e].1,
+                        partitions[i].1,
+                    );
+                    // After the swap re-select all storage partitions and
+                    // process partitions, as their positions have changed
+                    partitions = statements::select_all_storage_partitions_and_process_partitions();
+                    println!("new order {:?}", partitions);
+                    made_compaction = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // If made at least 1 change to the storage positions, it means it did a
+    // compaction, so update the number of compactions.
+    if made_compaction {
+        configuration::increment_compactions();
+    }
+}
+
 pub fn merge_storage_partitions() {
-    use schema::process_partition;
-    use schema::storage_partition;
-
-    let connection = establish_connection();
-
     // Do al merges until there is no more merging done
     let mut has_finished_merging: bool;
-    let mut storage_partitions: Vec<(i32, i32, Option<i32>)>;
+    let mut storage_partitions: Vec<(i32, i32, i32, i32, Option<i32>)>;
     loop {
         // Get all the partitions at the start, so the changes are reflected
-        storage_partitions = storage_partition::table
-            .left_join(process_partition::table)
-            .select((
-                storage_partition::id,
-                storage_partition::position,
-                process_partition::process_id.nullable(),
-            ))
-            .order(storage_partition::position.asc())
-            .load::<(i32, i32, Option<i32>)>(&connection)
-            .expect("Could not find free partitions");
-
+        storage_partitions = statements::select_all_storage_partitions_and_process_partitions();
         // It assumes the merging has been done here, as if no change is done later
         has_finished_merging = true;
         for i in 0..storage_partitions.len() {
             // If there is no process here, start merging
-            if storage_partitions[i].2.is_none() {
+            if storage_partitions[i].4.is_none() {
                 let mut new_partition_size = 0;
                 let mut partitions_changed: i32 = 0;
 
                 // Start from the empty partition and see if the next partitions are empty
                 for e in i..storage_partitions.len() {
-                    if storage_partitions[e].2.is_none() {
+                    if storage_partitions[e].4.is_none() {
                         let storage_partition =
                             select_storage_partition_with_id(storage_partitions[e].0);
                         // Add this partition size to the general partition that may be created
@@ -237,6 +300,19 @@ pub fn merge_storage_partitions() {
                             e as i32 - partitions_changed + 1,
                         );
                     }
+                    // Finally, update the condensation log for every partition that
+                    // was changed and the final partition
+                    let created_partition = select_storage_partition_with_position(i as i32);
+                    for e in i..i + partitions_changed as usize {
+                        create_condensation_log(
+                            storage_partitions[e].2,
+                            storage_partitions[e].3,
+                            created_partition.number,
+                            created_partition.size,
+                        );
+                    }
+                    // And update the number of condensations made
+                    configuration::increment_condensations();
                     break;
                 }
             }
@@ -354,9 +430,16 @@ pub fn create_storage_partition_with_position(position: i32, size: i32) {
     let connection = establish_connection();
 
     diesel::insert_into(storage_partition::table)
-        .values(models::NewStoragePartition { position, size })
+        .values(models::NewStoragePartition {
+            position,
+            number: configuration::get_partition_consecutive_number(),
+            size,
+        })
         .execute(&connection)
         .expect("Could not create storage partition with position.");
+    // Now that a new partition has been created, update the consecutive
+    // number.
+    configuration::increment_partition_consecutive_number();
 }
 
 pub fn create_storage_partition(size: i32) -> Option<models::StoragePartition> {
@@ -372,13 +455,21 @@ pub fn create_storage_partition(size: i32) -> Option<models::StoragePartition> {
 
         let new_storage_partition: models::NewStoragePartition;
         if last_partition_position.is_err() {
-            new_storage_partition = models::NewStoragePartition { position: 0, size };
+            new_storage_partition = models::NewStoragePartition {
+                position: 0,
+                number: configuration::get_partition_consecutive_number(),
+                size,
+            };
         } else {
             new_storage_partition = models::NewStoragePartition {
                 position: last_partition_position.unwrap() + 1,
+                number: configuration::get_partition_consecutive_number(),
                 size,
             };
         }
+        // Now that a new partition has been created, update the consecutive
+        // number.
+        configuration::increment_partition_consecutive_number();
 
         diesel::insert_into(storage_partition::table)
             .values(new_storage_partition)
@@ -410,7 +501,7 @@ pub fn delete_storage_partition_with_id(id: i32) {
         .expect("Could not delete partition");
 }
 
-pub fn create_process(process: Process) -> QueryResult<usize> {
+pub fn create_process(process: Process) -> () {
     use schema::process;
 
     let connection = establish_connection();
@@ -424,6 +515,7 @@ pub fn create_process(process: Process) -> QueryResult<usize> {
     diesel::insert_into(process::table)
         .values(&new_process)
         .execute(&connection)
+        .expect("Could not create process");
 }
 
 pub fn update_process_with_id(id: i32, process: &Process) -> QueryResult<usize> {
@@ -602,19 +694,7 @@ fn establish_connection() -> SqliteConnection {
         .expect(&format!("Error connecting to {}", database_url))
 }
 
-fn get_configuration_value(value: model::configuration::SettingName) -> models::Configuration {
-    use schema::configuration;
-
-    let connection = establish_connection();
-    configuration::table
-        .find(value as i32)
-        .first::<models::Configuration>(&connection)
-        .expect("Could not get configuration.")
-}
-
 fn can_create_storage_partition(size: i32) -> bool {
-    use model::configuration::SettingName;
-
     let partitions = select_all_storage_partitions();
 
     let mut used_memory: i32 = 0;
@@ -622,11 +702,7 @@ fn can_create_storage_partition(size: i32) -> bool {
         used_memory += partition.size;
     }
 
-    return used_memory + size
-        <= get_configuration_value(SettingName::MemorySize)
-            .setting_value
-            .parse::<i32>()
-            .unwrap();
+    return used_memory + size <= configuration::get_memory_size();
 }
 
 fn insert_process_into_storage_partition(
@@ -637,4 +713,57 @@ fn insert_process_into_storage_partition(
         process_id: process.id,
         storage_partition_id: storage_partition.id,
     });
+}
+
+pub fn create_finished_process(process_id: i32, partition_number: i32) -> () {
+    use schema::finished_process;
+
+    let connection = establish_connection();
+    diesel::insert_into(finished_process::table)
+        .values(&models::NewFinishedProcess { process_id, partition_number })
+        .execute(&connection)
+        .expect("Could not insert finished process");
+}
+
+pub fn select_all_finished_processes() -> Vec<(models::FinishedProcess, models::Process)> {
+    use schema::finished_process;
+    use schema::process;
+
+    let connection = establish_connection();
+    finished_process::table
+        .inner_join(process::table)
+        .load::<(models::FinishedProcess, models::Process)>(&connection)
+        .expect("Could not get all finished processes")
+}
+
+pub fn select_all_compaction_logs() -> Vec<models::CompactionLog> {
+    use schema::compaction_log;
+
+    let connection = establish_connection();
+    compaction_log::table
+        .load::<models::CompactionLog>(&connection)
+        .expect("Could not get all compaction logs")
+}
+
+pub fn select_all_condensation_logs() -> Vec<models::CondensationLog> {
+    use schema::condensation_log;
+
+    let connection = establish_connection();
+    condensation_log::table
+        .load::<models::CondensationLog>(&connection)
+        .expect("Could not get all compaction logs")
+}
+
+pub fn select_storage_partition_with_process_id(
+    process_id: i32,
+) -> (models::StoragePartition, models::ProcessPartition) {
+    use schema::process_partition;
+    use schema::storage_partition;
+
+    let connection = establish_connection();
+    storage_partition::table
+        .inner_join(process_partition::table)
+        .filter(process_partition::process_id.eq(process_id))
+        .first::<(models::StoragePartition, models::ProcessPartition)>(&connection)
+        .expect("Could not find storage partition with process id")
 }

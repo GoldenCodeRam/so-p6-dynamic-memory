@@ -1,9 +1,56 @@
 use serde::Serialize;
 
 use super::schema::{
-    configuration, process, process_log, process_partition, storage_partition,
-    storage_partition_log,
+    compaction_log, condensation_log, configuration, finished_process, process, process_log,
+    process_partition, storage_partition, storage_partition_log,
 };
+
+#[derive(Insertable)]
+#[table_name = "finished_process"]
+pub struct NewFinishedProcess {
+    pub process_id: i32,
+    pub partition_number: i32,
+}
+#[derive(Queryable, Serialize)]
+pub struct FinishedProcess {
+    pub id: i32,
+    pub process_id: i32,
+    pub partition_number: i32,
+}
+
+#[derive(Insertable)]
+#[table_name = "compaction_log"]
+pub struct NewCompactionLog {
+    pub iteration: i32,
+    pub partition: i32,
+    pub previous_position: i32,
+    pub final_position: i32,
+}
+#[derive(Queryable, Serialize)]
+pub struct CompactionLog {
+    pub id: i32,
+    pub iteration: i32,
+    pub partition: i32,
+    pub previous_position: i32,
+    pub final_position: i32,
+}
+
+#[derive(Insertable)]
+#[table_name = "condensation_log"]
+pub struct NewCondensationLog {
+    pub partition: i32,
+    pub partition_size: i32,
+    pub new_partition: i32,
+    pub new_partition_size: i32,
+}
+#[derive(Queryable, Serialize)]
+pub struct CondensationLog {
+    pub id: i32,
+    pub partition: i32,
+    pub partition_size: i32,
+    pub new_partition: i32,
+    pub new_partition_size: i32,
+}
 
 #[derive(Queryable, Serialize)]
 pub struct Process {
@@ -26,6 +73,7 @@ pub struct NewProcess<'a> {
 #[derive(Queryable, Serialize)]
 pub struct StoragePartition {
     pub id: i32,
+    pub number: i32,
     pub position: i32,
     pub size: i32,
 }
@@ -33,6 +81,7 @@ pub struct StoragePartition {
 #[derive(Insertable)]
 #[table_name = "storage_partition"]
 pub struct NewStoragePartition {
+    pub number: i32,
     pub position: i32,
     pub size: i32,
 }

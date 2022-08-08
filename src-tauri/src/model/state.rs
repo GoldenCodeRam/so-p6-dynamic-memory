@@ -2,10 +2,10 @@ use super::process::Process;
 
 #[derive(Copy, Clone)]
 pub enum StateEnum {
-    READY,
-    READY_IN_PARTITION,
-    RUNNING,
-    FINISHED,
+    Ready,
+    ReadyInPartition,
+    Running,
+    Finished,
 }
 
 pub trait State {
@@ -21,7 +21,7 @@ impl State for Ready {
     }
 
     fn get_state_number(&self) -> i32 {
-        StateEnum::READY as i32
+        StateEnum::Ready as i32
     }
 }
 
@@ -33,7 +33,7 @@ impl State for ReadyInPartition {
     }
 
     fn get_state_number(&self) -> i32 {
-        StateEnum::READY_IN_PARTITION as i32
+        StateEnum::ReadyInPartition as i32
     }
 }
 
@@ -44,13 +44,23 @@ impl State for Running {
         if process.time > 0 {
             Box::new(ReadyInPartition {})
         } else {
+            // Add the finished process to the finished process list with the
+            // information of the partition the process was in.
+            database::create_finished_process(
+                process.id.unwrap(),
+                database::select_storage_partition_with_process_id(process.id.unwrap())
+                    .0
+                    .number,
+            );
+            // Remove the process from the processor, this is the process
+            // partition.
             database::delete_process_partition_with_process_id(process.id.unwrap());
             Box::new(Finished {})
         }
     }
 
     fn get_state_number(&self) -> i32 {
-        StateEnum::RUNNING as i32
+        StateEnum::Running as i32
     }
 }
 
@@ -61,18 +71,16 @@ impl State for Finished {
     }
 
     fn get_state_number(&self) -> i32 {
-        StateEnum::FINISHED as i32
+        StateEnum::Finished as i32
     }
 }
 
 pub fn get_state_from_enum(value: i32) -> Option<Box<dyn State>> {
     match value {
-        value if value == StateEnum::READY as i32 => Some(Box::new(Ready {})),
-        value if value == StateEnum::READY_IN_PARTITION as i32 => {
-            Some(Box::new(ReadyInPartition {}))
-        }
-        value if value == StateEnum::RUNNING as i32 => Some(Box::new(Running {})),
-        value if value == StateEnum::FINISHED as i32 => Some(Box::new(Finished {})),
+        value if value == StateEnum::Ready as i32 => Some(Box::new(Ready {})),
+        value if value == StateEnum::ReadyInPartition as i32 => Some(Box::new(ReadyInPartition {})),
+        value if value == StateEnum::Running as i32 => Some(Box::new(Running {})),
+        value if value == StateEnum::Finished as i32 => Some(Box::new(Finished {})),
         _ => panic!("State not recognized"),
     }
 }
