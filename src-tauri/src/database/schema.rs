@@ -72,6 +72,8 @@ table! {
         id -> Integer,
         number -> Integer,
         position -> Integer,
+        position_start -> Integer,
+        position_end -> Integer,
         size -> Integer,
     }
 }

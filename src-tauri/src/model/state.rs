@@ -8,6 +8,8 @@ pub enum StateEnum {
     Finished,
 }
 
+const PROCESSING_TIME: i32 = 1;
+
 pub trait State {
     fn process(self: Box<Self>, process: &mut Process) -> Box<dyn State>;
     fn get_state_number(&self) -> i32;
@@ -16,7 +18,7 @@ pub trait State {
 pub struct Ready;
 impl State for Ready {
     fn process(self: Box<Ready>, process: &mut Process) -> Box<dyn State> {
-        process.time = std::cmp::max(0, process.time - 5);
+        process.time = std::cmp::max(0, process.time - PROCESSING_TIME);
         Box::new(Running {})
     }
 
@@ -28,7 +30,7 @@ impl State for Ready {
 struct ReadyInPartition;
 impl State for ReadyInPartition {
     fn process(self: Box<Self>, process: &mut Process) -> Box<dyn State> {
-        process.time = std::cmp::max(0, process.time - 5);
+        process.time = std::cmp::max(0, process.time - PROCESSING_TIME);
         Box::new(Running {})
     }
 

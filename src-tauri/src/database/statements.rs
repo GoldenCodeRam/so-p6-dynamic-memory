@@ -18,7 +18,7 @@ pub fn create_compaction_log(partition: i32, previous_position: i32, final_posit
 }
 
 pub fn create_condensation_log(
-    partition: i32, 
+    partition: i32,
     partition_size: i32,
     new_partition: i32,
     new_partition_size: i32,
@@ -66,7 +66,8 @@ pub fn select_storage_partition_with_position(position: i32) -> models::StorageP
         .expect("Could not find partition with position")
 }
 
-pub fn select_all_storage_partitions_and_process_partitions() -> Vec<(i32, i32, i32, i32, Option<i32>)> {
+pub fn select_all_storage_partitions_and_process_partitions(
+) -> Vec<(models::StoragePartition, Option<i32>)> {
     use schema::process_partition;
     use schema::storage_partition;
 
@@ -74,13 +75,10 @@ pub fn select_all_storage_partitions_and_process_partitions() -> Vec<(i32, i32, 
     return storage_partition::table
         .left_join(process_partition::table)
         .select((
-            storage_partition::id,
-            storage_partition::position,
-            storage_partition::number,
-            storage_partition::size,
+            storage_partition::all_columns,
             process_partition::process_id.nullable(),
         ))
         .order(storage_partition::position.asc())
-        .load::<(i32, i32, i32, i32, Option<i32>)>(&connection)
+        .load::<(models::StoragePartition, Option<i32>)>(&connection)
         .expect("Could not find storage partitions and process partitions");
 }

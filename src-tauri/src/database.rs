@@ -1,6 +1,7 @@
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
+use crate::database::statements::select_all_storage_partitions_and_process_partitions;
 use crate::model::process::Process;
 use crate::model::state::StateEnum;
 
@@ -131,11 +132,6 @@ pub fn create_storage_partition_from_remaining_space() {
 }
 
 pub fn get_empty_storage_partition(process_size: i32) -> Option<models::StoragePartition> {
-    use schema::process_partition;
-    use schema::storage_partition;
-
-    let connection = establish_connection();
-
     /*
     Select all the storage partitions with an associated process id, if it has any.
     If it doesn't it means it is empty so a new process can enter.
@@ -148,50 +144,44 @@ pub fn get_empty_storage_partition(process_size: i32) -> Option<models::StorageP
     |size             |    +--------------------+
     +-----------------+
     */
-    let storage_partitions = storage_partition::table
-        .left_join(process_partition::table)
-        .select((
-            storage_partition::id,
-            storage_partition::position,
-            storage_partition::size,
-            process_partition::process_id.nullable(),
-        ))
-        .order(storage_partition::position.asc())
-        .load::<(i32, i32, i32, Option<i32>)>(&connection)
-        .expect("Could not find storage partitions with processes partitions");
+    let storage_partitions = select_all_storage_partitions_and_process_partitions();
 
-    println!("{:?}", storage_partitions);
     for i in 0..storage_partitions.len() {
         // Then the process might enter here.
-        if storage_partitions[i].3.is_none() {
+        if storage_partitions[i].1.is_none() {
             // Then the process is the same size as the partition, it does not
             // remove or change the partition.
-            if storage_partitions[i].2 == process_size {
-                return Some(select_storage_partition_with_id(storage_partitions[i].0));
+            if storage_partitions[i].0.size == process_size {
+                return Some(select_storage_partition_with_id(storage_partitions[i].0.id));
             }
             // It means the partition is bigger than the process, so it has to
             // be removed and changed
-            else if storage_partitions[i].2 > process_size {
+            else if storage_partitions[i].0.size > process_size {
                 // Delete the current partition
-                delete_storage_partition_with_id(storage_partitions[i].0);
+                delete_storage_partition_with_id(storage_partitions[i].0.id);
                 // Create a new partition only for the process to fit in
-                create_storage_partition_with_position(storage_partitions[i].1, process_size);
+                create_storage_partition_with_position(
+                    storage_partitions[i].0.position,
+                    process_size,
+                );
                 // Next to the created partition create a new one with the remaining space
                 create_storage_partition_with_position(
-                    storage_partitions[i].1 + 1,
-                    storage_partitions[i].2 - process_size,
+                    storage_partitions[i].0.position + 1,
+                    storage_partitions[i].0.size - process_size,
                 );
                 // Update all remaining partitions positions
                 for e in i + 1..storage_partitions.len() {
                     // All partitons after are moved 1 space to the right
                     update_storage_partition_position(
-                        storage_partitions[e].0,
-                        storage_partitions[e].1 + 1,
+                        storage_partitions[e].0.id,
+                        storage_partitions[e].0.position + 1,
+                        storage_partitions[e].0.position_end,
+                        storage_partitions[e].0.position_end + storage_partitions[e].0.size,
                     );
                 }
                 // Return the new partiton for the process to fit in
                 return Some(statements::select_storage_partition_with_position(
-                    storage_partitions[i].1,
+                    storage_partitions[i].0.position,
                 ));
             }
         }
@@ -200,36 +190,50 @@ pub fn get_empty_storage_partition(process_size: i32) -> Option<models::StorageP
 }
 
 pub fn swap_process_partitions_with_empty_partitions() -> () {
-    let mut partitions: Vec<(i32, i32, i32, i32, Option<i32>)>;
+    let mut partitions: Vec<(models::StoragePartition, Option<i32>)>;
     let mut made_compaction = false;
     // Get all the partitions
     partitions = statements::select_all_storage_partitions_and_process_partitions();
-    println!("{:?}", partitions);
     // Get all the storage partitions and process partitions, ordered by
     // position and if it has a process or not.
     for i in 0..partitions.len() {
         // If the partition is empty, we can try to search a non-empty partition
         // and swap the positions of the partitions, so always the empty are
         // at the end.
-        if partitions[i].4.is_none() {
+        if partitions[i].1.is_none() {
             // From the current empty partition search the next non-empty
             // partition.
             for e in i..partitions.len() {
                 // If it found a non-empty partition, do the swap
-                if !partitions[e].4.is_none() {
-                    println!("swapping {:?} and {:?}", partitions[e], partitions[i]);
-                    update_storage_partition_position(partitions[e].0, partitions[i].1);
-                    update_storage_partition_position(partitions[i].0, partitions[e].1);
+                if !partitions[e].1.is_none() {
+                    println!("{} a {}", partitions[e].0.position, partitions[i].0.position);
+                    println!("{}", partitions[e].0.position_start);
+                    println!("{}", partitions[e].0.position_end);
+                    println!("{}", partitions[i].0.position_start);
+                    println!("{}", partitions[i].0.position_end);
+                    update_storage_partition_position(
+                        partitions[e].0.id,
+                        partitions[i].0.position,
+                        partitions[i].0.position_start,
+                        partitions[i].0.position_start + partitions[e].0.size,
+                    );
+                    update_storage_partition_position(
+                        partitions[i].0.id,
+                        partitions[e].0.position,
+                        partitions[i].0.position_start + partitions[e].0.size,
+                        partitions[i].0.position_start
+                            + partitions[e].0.size
+                            + partitions[i].0.size,
+                    );
                     // Save log of the part of the compaction done
                     statements::create_compaction_log(
-                        partitions[e].2,
-                        partitions[e].1,
-                        partitions[i].1,
+                        partitions[e].0.number,
+                        partitions[e].0.position_start,
+                        partitions[i].0.position_start,
                     );
                     // After the swap re-select all storage partitions and
                     // process partitions, as their positions have changed
                     partitions = statements::select_all_storage_partitions_and_process_partitions();
-                    println!("new order {:?}", partitions);
                     made_compaction = true;
                     break;
                 }
@@ -247,7 +251,7 @@ pub fn swap_process_partitions_with_empty_partitions() -> () {
 pub fn merge_storage_partitions() {
     // Do al merges until there is no more merging done
     let mut has_finished_merging: bool;
-    let mut storage_partitions: Vec<(i32, i32, i32, i32, Option<i32>)>;
+    let mut storage_partitions: Vec<(models::StoragePartition, Option<i32>)>;
     loop {
         // Get all the partitions at the start, so the changes are reflected
         storage_partitions = statements::select_all_storage_partitions_and_process_partitions();
@@ -255,15 +259,15 @@ pub fn merge_storage_partitions() {
         has_finished_merging = true;
         for i in 0..storage_partitions.len() {
             // If there is no process here, start merging
-            if storage_partitions[i].4.is_none() {
+            if storage_partitions[i].1.is_none() {
                 let mut new_partition_size = 0;
                 let mut partitions_changed: i32 = 0;
 
                 // Start from the empty partition and see if the next partitions are empty
                 for e in i..storage_partitions.len() {
-                    if storage_partitions[e].4.is_none() {
+                    if storage_partitions[e].1.is_none() {
                         let storage_partition =
-                            select_storage_partition_with_id(storage_partitions[e].0);
+                            select_storage_partition_with_id(storage_partitions[e].0.id);
                         // Add this partition size to the general partition that may be created
                         // later if the partitions changed is bigger than 1.
                         new_partition_size += storage_partition.size;
@@ -282,13 +286,13 @@ pub fn merge_storage_partitions() {
                     Start from this partition and delete all the partitions that
                     where empty.
                     Partitions changed = 3,
-                     0 1 2 3 4     0 4
+                     0 1 2 3 4     0 1
                     +-+-+-+-+-+   +-+-+
                     |X|E|E|E|X+-->|X|X|
                     +-+-+-+-+-+   +-+-+
                      */
                     for e in i..i + partitions_changed as usize {
-                        delete_storage_partition_with_id(storage_partitions[e].0);
+                        delete_storage_partition_with_id(storage_partitions[e].0.id);
                     }
                     // Create the new big partition from the first position, as if
                     // the partition was big enough from the start
@@ -296,8 +300,11 @@ pub fn merge_storage_partitions() {
                     // Update all the remaining partition's positions
                     for e in i + partitions_changed as usize..storage_partitions.len() {
                         update_storage_partition_position(
-                            storage_partitions[e].0,
+                            storage_partitions[e].0.id,
                             e as i32 - partitions_changed + 1,
+                            storage_partitions[e].0.position_start - new_partition_size,
+                            (storage_partitions[e].0.position_start - new_partition_size)
+                                + storage_partitions[e].0.size,
                         );
                     }
                     // Finally, update the condensation log for every partition that
@@ -305,8 +312,8 @@ pub fn merge_storage_partitions() {
                     let created_partition = select_storage_partition_with_position(i as i32);
                     for e in i..i + partitions_changed as usize {
                         create_condensation_log(
-                            storage_partitions[e].2,
-                            storage_partitions[e].3,
+                            storage_partitions[e].0.number,
+                            storage_partitions[e].0.size,
                             created_partition.number,
                             created_partition.size,
                         );
@@ -429,14 +436,34 @@ pub fn create_storage_partition_with_position(position: i32, size: i32) {
 
     let connection = establish_connection();
 
-    diesel::insert_into(storage_partition::table)
-        .values(models::NewStoragePartition {
-            position,
-            number: configuration::get_partition_consecutive_number(),
-            size,
-        })
-        .execute(&connection)
-        .expect("Could not create storage partition with position.");
+    let partition_before = storage_partition::table
+        .filter(storage_partition::position.eq(position - 1))
+        .first::<models::StoragePartition>(&connection);
+
+    if partition_before.is_ok() {
+        diesel::insert_into(storage_partition::table)
+            .values(models::NewStoragePartition {
+                number: configuration::get_partition_consecutive_number(),
+                position,
+                position_start: partition_before.as_ref().unwrap().position_end,
+                position_end: partition_before.as_ref().unwrap().position_end + size,
+                size,
+            })
+            .execute(&connection)
+            .expect("Could not create storage partition with position.");
+    } else {
+        diesel::insert_into(storage_partition::table)
+            .values(models::NewStoragePartition {
+                number: configuration::get_partition_consecutive_number(),
+                position,
+                position_start: 0,
+                position_end: size,
+                size,
+            })
+            .execute(&connection)
+            .expect("Could not create storage partition with position.");
+    }
+
     // Now that a new partition has been created, update the consecutive
     // number.
     configuration::increment_partition_consecutive_number();
@@ -449,21 +476,24 @@ pub fn create_storage_partition(size: i32) -> Option<models::StoragePartition> {
         let connection = establish_connection();
 
         let last_partition_position = storage_partition::table
-            .select(storage_partition::position)
             .order(storage_partition::position.desc())
-            .first::<i32>(&connection);
+            .first::<models::StoragePartition>(&connection);
 
         let new_storage_partition: models::NewStoragePartition;
         if last_partition_position.is_err() {
             new_storage_partition = models::NewStoragePartition {
-                position: 0,
                 number: configuration::get_partition_consecutive_number(),
+                position: 0,
+                position_start: 0,
+                position_end: size,
                 size,
             };
         } else {
             new_storage_partition = models::NewStoragePartition {
-                position: last_partition_position.unwrap() + 1,
                 number: configuration::get_partition_consecutive_number(),
+                position: last_partition_position.as_ref().unwrap().position + 1,
+                position_start: last_partition_position.as_ref().unwrap().position_end,
+                position_end: last_partition_position.as_ref().unwrap().position_end + size,
                 size,
             };
         }
@@ -532,13 +562,22 @@ pub fn update_process_with_id(id: i32, process: &Process) -> QueryResult<usize> 
         .execute(&connection)
 }
 
-pub fn update_storage_partition_position(id: i32, position: i32) {
+pub fn update_storage_partition_position(
+    id: i32,
+    position: i32,
+    position_start: i32,
+    position_end: i32,
+) {
     use schema::storage_partition;
 
     let connection = establish_connection();
     println!("new position {}", position);
     diesel::update(storage_partition::table.find(id))
-        .set(storage_partition::position.eq(position))
+        .set((
+            storage_partition::position.eq(position),
+            storage_partition::position_start.eq(position_start),
+            storage_partition::position_end.eq(position_end),
+        ))
         .execute(&connection)
         .expect("Could not update storage partition position");
 }
@@ -720,7 +759,10 @@ pub fn create_finished_process(process_id: i32, partition_number: i32) -> () {
 
     let connection = establish_connection();
     diesel::insert_into(finished_process::table)
-        .values(&models::NewFinishedProcess { process_id, partition_number })
+        .values(&models::NewFinishedProcess {
+            process_id,
+            partition_number,
+        })
         .execute(&connection)
         .expect("Could not insert finished process");
 }

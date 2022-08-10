@@ -1,6 +1,9 @@
+import type { Process } from "./process";
+
 export type CompactionLog = {
     final_position: number;
     iteration: number;
-    partition: number;
     previous_position: number;
+    partition: number;
+    process: Process;
 }

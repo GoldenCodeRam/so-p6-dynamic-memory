@@ -36,6 +36,14 @@
         for (const result of (await invoke(
             "select_compaction_logs"
         )) as CompactionLog[]) {
+            for (const process of finished_processes) {
+                if (process.partition_number === result.partition) {
+                    result.process = process;
+                    break;
+                }
+            }
+            console.log(result);
+
             compaction_logs.push(result);
         }
 
@@ -89,11 +97,11 @@
             <div class="col-3">
                 <div class="p-2 m-2 bg-white rounded">
                     <div>
-                        <h3>Condensaciones</h3>
+                        <h4>Condensaciones</h4>
                         <p class="text-center">{condensations}</p>
                     </div>
                     <div>
-                        <h3>Compactaciones</h3>
+                        <h4>Compactaciones</h4>
                         <p class="text-center">{compactions}</p>
                     </div>
                 </div>
@@ -104,9 +112,11 @@
                     <ul class="list-group list-group-numbered">
                         {#each finished_processes as finished_process}
                             <li class="list-group-item">
-                                {finished_process.name}
-                                {finished_process.size}
-                                {finished_process.partition_number}
+                                Nombre: {finished_process.name}
+                                <br />
+                                Tamaño: {finished_process.size}
+                                <br />
+                                Partición: {finished_process.partition_number}
                             </li>
                         {/each}
                     </ul>
@@ -125,9 +135,9 @@
                                             <li class="list-group-item">
                                                 Partición: {compaction.partition}
                                                 <br />
-                                                Posición previa: {compaction.previous_position}
+                                                Posición previa: {compaction.previous_position} a {compaction.previous_position + compaction.process.size}
                                                 <br />
-                                                Nueva posición: {compaction.final_position}
+                                                Nueva posición: {compaction.final_position} a {compaction.final_position + compaction.process.size}
                                                 <br />
                                             </li>
                                         {/each}

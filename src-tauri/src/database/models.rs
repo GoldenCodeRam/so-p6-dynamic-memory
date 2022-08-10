@@ -75,6 +75,8 @@ pub struct StoragePartition {
     pub id: i32,
     pub number: i32,
     pub position: i32,
+    pub position_start: i32,
+    pub position_end: i32,
     pub size: i32,
 }
 
@@ -83,6 +85,8 @@ pub struct StoragePartition {
 pub struct NewStoragePartition {
     pub number: i32,
     pub position: i32,
+    pub position_start: i32,
+    pub position_end: i32,
     pub size: i32,
 }
 
